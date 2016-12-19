@@ -30,3 +30,13 @@ services:
 #  nginx:
 #    volumes:
 #     - ./nginx/ssl:/etc/nginx/ssl:Z
+
+# Networking not works in macOS and /dev/shm has some issues with access to it
+
+mysql:
+  volumes:
+    - ./dev/shm/${COMPOSE_PROJECT_NAME}_mysql:/var/lib/mysql:Z
+
+nginx:
+  ports:
+    - "8086:80"

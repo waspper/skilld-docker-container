@@ -13,7 +13,7 @@ endif
 
 build: clean
 	mkdir -p build
-	mkdir -p /dev/shm/${COMPOSE_PROJECT_NAME}_mysql
+	mkdir -p src/docker/dev/shm/${COMPOSE_PROJECT_NAME}_mysql
 
 install:
 	@echo "Updating containers..."
