@@ -10,10 +10,7 @@ services:
     depends_on:
       - mysql
     volumes:
-      - ../../build:/var/www/html:z
-      - ../${PROFILE_NAME}:/var/www/html/profiles/${PROFILE_NAME}:z
-      - ../modules:/var/www/html/modules/custom:z
-      - ../themes:/var/www/html/themes/custom:z
+      - ../../docroot:/var/www/html:z
     restart: always
     networks:
       - front
@@ -36,12 +33,12 @@ services:
     image: percona:5.7
     container_name: "${COMPOSE_PROJECT_NAME}_mysql"
     volumes:
-      - /dev/shm/${COMPOSE_PROJECT_NAME}_mysql:/var/lib/mysql:Z
+      - ./docker-runtime/${COMPOSE_PROJECT_NAME}_mysql:/var/lib/mysql:Z
     environment:
-      MYSQL_DATABASE: d8
-      MYSQL_USER: d8
-      MYSQL_PASSWORD: d8
-      MYSQL_ROOT_PASSWORD: d8root
+      MYSQL_DATABASE: drupal
+      MYSQL_USER: drupal
+      MYSQL_PASSWORD: drupal
+      MYSQL_ROOT_PASSWORD: root
     restart: always
     networks:
       - front
