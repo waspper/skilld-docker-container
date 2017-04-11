@@ -55,3 +55,19 @@ endif
 
 iprange:
 	$(shell grep -q -F 'IPRANGE=' .env || echo "\nIPRANGE=$(shell docker network inspect $(COMPOSE_PROJECT_NAME)_front --format '{{(index .IPAM.Config 0).Subnet}}')" >> .env)
+
+phpcs:
+	# TODO $CUSTOM_MODULES_PATH and $CUSTOM_THEMES_PATH should be properly defined.
+	@echo "Checking custom code styles"
+	docker run --rm -v $(shell pwd)/docroot/$(CUSTOM_MODULES_PATH):/work skilldlabs/docker-phpcs-drupal phpcs --standard=Drupal --extensions=php,module,inc,install,test,profile,theme,info .
+	docker run --rm -v $(shell pwd)/docroot/$(CUSTOM_THEMES_PATH):/work skilldlabs/docker-phpcs-drupal phpcs --standard=Drupal --extensions=php,module,inc,install,test,profile,theme,info .
+	docker run --rm -v $(shell pwd)/docroot/$(CUSTOM_MODULES_PATH):/work skilldlabs/docker-phpcs-drupal phpcs --standard=DrupalPractice --extensions=php,module,inc,install,test,profile,theme,info .
+	docker run --rm -v $(shell pwd)/docroot/$(CUSTOM_THEMES_PATH):/work skilldlabs/docker-phpcs-drupal phpcs --standard=DrupalPractice --extensions=php,module,inc,install,test,profile,theme,info .
+
+phpcbf:
+	# TODO $CUSTOM_MODULES_PATH and $CUSTOM_THEMES_PATH should be properly defined.
+	@echo "Fixing custom code styles"
+	docker run --rm -v $(shell pwd)/docroot/$(CUSTOM_MODULES_PATH):/work skilldlabs/docker-phpcs-drupal phpcbf --standard=Drupal --extensions=php,module,inc,install,test,profile,theme,info .
+	docker run --rm -v $(shell pwd)/docroot/$(CUSTOM_THEMES_PATH):/work skilldlabs/docker-phpcs-drupal phpcbf --standard=Drupal --extensions=php,module,inc,install,test,profile,theme,info .
+	docker run --rm -v $(shell pwd)/docroot/$(CUSTOM_MODULES_PATH):/work skilldlabs/docker-phpcs-drupal phpcbf --standard=DrupalPractice --extensions=php,module,inc,install,test,profile,theme,info .
+	docker run --rm -v $(shell pwd)/docroot/$(CUSTOM_THEMES_PATH):/work skilldlabs/docker-phpcs-drupal phpcbf --standard=DrupalPractice --extensions=php,module,inc,install,test,profile,theme,info .
