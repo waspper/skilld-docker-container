@@ -1,5 +1,5 @@
 ## Run sniffer validations (executed as git hook, by scripts/git_hooks/sniffers.sh)
-sniffers: | clang compval phpcs newlineeof #hookupdateval
+sniffers: | clang compval phpcs newlineeof
 
 ## Run all tests & validations (including sniffers)
 tests: | sniffers cinsp drupalrectorval upgradestatusval behat watchdogval statusreportval patchval
@@ -7,13 +7,12 @@ tests: | sniffers cinsp drupalrectorval upgradestatusval behat watchdogval statu
 
 # Function for code sniffer images.
 phpcsexec = docker run --rm \
-	-v $(CURDIR)/web/profiles/$(PROFILE_NAME):/work/profile \
 	-v $(CURDIR)/web/modules/custom:/work/modules \
 	-v $(CURDIR)/web/themes/custom:/work/themes \
 	skilldlabs/docker-phpcs-drupal ${1} -s --colors \
 	--standard=Drupal,DrupalPractice \
 	--extensions=php,module,inc,install,profile,theme,yml,txt,md,js \
-	--ignore=*.css,libraries/*,dist/*,styleguide/*,README.md,README.txt,node_modules/*,work/themes/**.js,work/themes/**.md \
+	--ignore=*.min.js,*.css,libraries/*,dist/*,styleguide/*,README.md,README.txt,node_modules/*,work/themes/**.js,work/themes/**.md \
 	.
 
 ## Validate codebase with phpcs sniffers to make sure it conforms https://www.drupal.org/docs/develop/standards
@@ -66,18 +65,7 @@ endif
 ## Validate composer.json file
 compval:
 	@echo "Composer.json validation..."
-	# Can't use --strict cause we need dev versions for d9 compatibility
 	@docker run --rm -v $(CURDIR):/mnt -w /mnt $(IMAGE_PHP) composer validate
-
-## Validate if hook_update_N() are required
-hookupdateval:
-ifneq ("$(wildcard scripts/makefile/hookupdateval.sh)","")
-	@echo "hook_update_N() validation..."
-	@/bin/sh ./scripts/makefile/hookupdateval.sh
-else
-	@echo "scripts/makefile/hookupdateval.sh file does not exist"
-	@exit 1
-endif
 
 ## Validate watchdog logs
 watchdogval:
@@ -101,13 +89,13 @@ endif
 
 ## Validate drupal-rector
 drupalrectorval:
-ifneq ("$(wildcard rector.yml)","")
+ifneq ("$(wildcard rector.php)","")
 	@echo "Drupal Rector validation..."
 	$(call php, composer install -o)
 	$(call php, vendor/bin/rector -V)
 	$(call php, vendor/bin/rector process --dry-run --no-progress-bar web/modules/custom web/themes/custom)
 else
-	@echo "rector.yml file does not exist"
+	@echo "rector.php file does not exist"
 	@exit 1
 endif
 
@@ -147,9 +135,9 @@ BEHAT_ARGS ?= --colors
 behat:
 	@echo "Getting base url"
 ifdef REVIEW_DOMAIN
-	$(eval BASE_URL := $(MAIN_DOMAIN_NAME))
+	$(eval BASE_URL := https:\/\/$(RA_BASIC_AUTH_USERNAME):$(RA_BASIC_AUTH_PASSWORD)@$(MAIN_DOMAIN_NAME))
 else
-	$(eval BASE_URL := $(shell docker inspect --format='{{(index .NetworkSettings.Networks "$(COMPOSE_NET_NAME)").IPAddress}}' $(COMPOSE_PROJECT_NAME)_web))
+	$(eval BASE_URL := http:\/\/$(shell docker inspect --format='{{(index .NetworkSettings.Networks "$(COMPOSE_NET_NAME)").IPAddress}}' $(COMPOSE_PROJECT_NAME)_web))
 endif
 	echo "Base URL: " $(BASE_URL)
 	if [ -z `docker ps -f 'name=$(COMPOSE_PROJECT_NAME)_chrome' --format '{{.Names}}'` ]; then \
@@ -158,7 +146,7 @@ endif
 	fi
 	@echo "Replacing URL_TO_TEST value in behat.yml with http://$(BASE_URL)"
 	$(call php, cp behat.default.yml behat.yml)
-	$(call php, sed -i "s/URL_TO_TEST/http:\/\/$(BASE_URL)/" behat.yml)
+	$(call php, sed -i "s/URL_TO_TEST/$(BASE_URL)/g" behat.yml)
 	@echo "Running Behat scenarios against http://$(BASE_URL)"
 	$(call php, composer install -o)
 	$(call php, vendor/bin/behat -V)
@@ -177,9 +165,10 @@ behatdi:
 browser_driver:
 	docker run -d --init --rm --name $(COMPOSE_PROJECT_NAME)_chrome \
 	--network container:$(COMPOSE_PROJECT_NAME)_php \
+	--entrypoint "" \
 	$(IMAGE_DRIVER) \
+	chromium-browser --headless --disable-gpu \
 	--remote-debugging-address=0.0.0.0 --remote-debugging-port=9222 --no-sandbox \
-	--entrypoint "" chromium-browser --headless --disable-gpu \
 	--window-size=1200,2080 \
 	--disable-web-security --w3c=false
 
@@ -203,7 +192,7 @@ endif
 blackfire:
 ifneq ("$(wildcard scripts/makefile/blackfire.sh)","")
 	$(call php-0, /bin/sh ./scripts/makefile/blackfire.sh)
-	$(call php-0, kill -USR2 1)
+	$(call php-0, /bin/sh ./scripts/makefile/reload.sh)
 	@echo "Blackfire extension enabled"
 else
 	@echo "scripts/makefile/blackfire.sh file does not exist"
@@ -214,7 +203,7 @@ newrelic:
 ifdef NEW_RELIC_LICENSE_KEY
 	$(call php-0, /bin/sh ./scripts/makefile/newrelic.sh $(NEW_RELIC_LICENSE_KEY) '$(COMPOSE_PROJECT_NAME)')
 	$(call php, sed -i -e 's/#  <<: \*service-newrelic/  <<: \*service-newrelic/g' docker/docker-compose.override.yml)
-	docker-compose up -d
+	$(call php-0, /bin/sh ./scripts/makefile/reload.sh)
 	@echo "NewRelic PHP extension enabled"
 else
 	@echo "NewRelic install skipped as NEW_RELIC_LICENSE_KEY is not set"

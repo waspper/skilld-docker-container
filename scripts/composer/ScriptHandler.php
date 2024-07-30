@@ -10,9 +10,10 @@ namespace SkilldDrupal\composer;
 use Composer\Script\Event;
 use Composer\Semver\Comparator;
 use Drupal\Core\Site\Settings;
+use Drupal\Core\Site\SettingsEditor;
 use DrupalFinder\DrupalFinder;
 use Symfony\Component\Filesystem\Filesystem;
-use Webmozart\PathUtil\Path;
+use Symfony\Component\Filesystem\Path;
 
 /**
  * Class ScriptHandler
@@ -82,7 +83,12 @@ class ScriptHandler {
         'required' => TRUE,
       ];
       new Settings([]);
-      drupal_rewrite_settings($settings, $drupalRoot . '/sites/default/settings.php');
+      if (version_compare(\Drupal::VERSION, '10.1', '>=')) {
+        SettingsEditor::rewrite($drupalRoot . '/sites/default/settings.php', $settings);
+      }
+      else {
+        drupal_rewrite_settings($settings, $drupalRoot . '/sites/default/settings.php');
+      }
       $fs->chmod($drupalRoot . '/sites/default/settings.php', 0666);
       $event->getIO()
         ->write("Create a sites/default/settings.php file with chmod 0666");

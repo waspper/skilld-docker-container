@@ -1,58 +1,75 @@
 # Variables to add in Gitalb UI : Settings > CI/CD
-# - SONAR_HOST // Optional
-# - SONAR_TOKEN // Optional
 # - NEW_RELIC_LICENSE_KEY // Optional
-# - RUN_HOOKUPDATE_CI_JOB // Optional
+# - TEST_UPDATE_DEPLOYMENTS // Optional, enables test:deploy job
+# - GITLAB_PROJECT_ACCESS_TOKEN // Required by test:deploy job. To be created in Gitlab project UI with read_api and read_repository permissions
+# - GITLAB_PROJECT_BASIC_AUTH // Required by test:deploy job. Encoded credentials to pass Gitlab basic auth, if any
 
 variables:
-  GIT_DEPTH: "10"
+  GIT_DEPTH: "1"
   THEME_PATH: "" # Update to enable front jobs (web/themes/custom/XXX)
   STORYBOOK_PATH: "" # Update to enable storybook job (themes/custom/XXX/dist/storybook/index.html)
   GIT_STRATEGY: fetch
-  REVIEW_DOMAIN: "XXX.XXX.com" # Mandatory, should equal to DNS of available runner server with docker + docker-compose + traefik
+  REVIEW_DOMAIN: "XXX.XXX.com" # Mandatory, should equal to DNS of available runner server with docker + compose + traefik
+  IMAGE_PHP: skilldlabs/php:83
 
-image: skilldlabs/php:74
+image: $IMAGE_PHP
 
 # Tags defines which runner to use (expected shell runner)
 .runner_tag_selection:
   tags:
-    - XXX # Mandatory, should equal to tag of available runner server with docker + docker-compose + traefik
+    - XXX # Mandatory, should equal to tag of available runner server with docker + compose + traefik
 
 before_script:
   - date
   - pwd
+  - ls -lah
+  - whoami
+  - id
+  - cat /etc/os-release
+  - env
+  - echo $CI_PIPELINE_SOURCE
 
 stages:
   - sniffers
   - prepare
-  - deploy
-  - storybook
+  - build
+  - update
   - tests
-  - reports
+  - more tests
 
 sniffers:clang:
   stage: sniffers
   script:
-  - make clang
-  only:
-    - branches
-    - merge_requests
+    - make clang
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - {{ project.path }}/**/*
 
 sniffers:compose:
   stage: sniffers
   script:
-  - composer -vvv -V
-  # Can't use --strict cause we need dev versions for d9 compatibility
-  - time composer validate --profile
-  only:
-    - branches
-    - merge_requests
+    - composer -vvv -V
+    - time composer validate --profile
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - {{ project.path }}/**/*
 
 sniffers:front:
   stage: sniffers
-  before_script:
-    - date
-    - pwd
   script:
     - make front-install # Dependencies are required for js imports to pass linters
     - make lintval
@@ -65,83 +82,62 @@ sniffers:front:
     paths:
       - ${THEME_PATH}/node_modules/ # Populated during yarn install
   artifacts:
-    name: "$CI_COMMIT_REF_NAME:$CI_COMMIT_SHA:front"
+    name: "${CI_COMMIT_REF_NAME}:${CI_COMMIT_SHA}:front"
     expire_in: 1d
     paths:
       - ${THEME_PATH}/node_modules/ # Populated during yarn install
   extends: .runner_tag_selection
-  only:
-    refs:
-      - branches
-      - merge_requests
-      - tags
-    variables:
-      - $THEME_PATH
-
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline' && $THEME_PATH
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $THEME_PATH
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $THEME_PATH
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_TAG && $THEME_PATH
 
 sniffers:phpcs:
   stage: sniffers
   image: skilldlabs/docker-phpcs-drupal
   script:
-  - docker -v
-  - make phpcs
+    - docker -v
+    - make phpcs
   extends: .runner_tag_selection
-  only:
-    - branches
-    - merge_requests
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - {{ project.path }}/**/*
 
 sniffers:newlineeof:
   stage: sniffers
   script:
-  - make newlineeof
-  only:
-    - branches
-    - merge_requests
-
-sniffers:hookupdate:
-  stage: sniffers
-  script:
-  - make hookupdateval
-  only:
-    refs:
-      - branches
-      - merge_requests
-    variables:
-      - $RUN_HOOKUPDATE_CI_JOB == "TRUE" # To enable once site is live and cannot be rebuilt anymore
-
-sniffers:sonarqube:
-  stage: sniffers
-  image: skilldlabs/sonar-scanner:3.3
-  script:
-  - sonar-scanner
-    -Dsonar.projectKey=$CI_PROJECT_PATH_SLUG
-    -Dsonar.projectName=$CI_PROJECT_NAME
-    -Dsonar.host.url=${SONAR_HOST}
-    -Dsonar.login=${SONAR_TOKEN}
-    -Dsonar.projectBaseDir=.
-    -Dsonar.sources=.
-    -Dsonar.inclusions=settings/**,web/modules/custom/**,web/profiles/sdd/**,web/themes/custom/**
-  only:
-  - master
-  allow_failure: true
+    - make newlineeof
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - {{ project.path }}/**/*
 
 
 prepare:back:
   stage: prepare
   script:
     - docker --version
-    - docker-compose --version
-    - pwd
-    - ls -la
-    - echo "INSTALL_DEV_DEPENDENCIES=TRUE" >> .env.default
-    - echo "CI_PROJECT_NAME=${CI_PROJECT_NAME}"
-    - echo "CI_COMMIT_REF_SLUG=${CI_COMMIT_REF_SLUG}"
-    - echo "COMPOSE_PROJECT_NAME=${CI_PROJECT_NAME}-review-${CI_COMMIT_REF_SLUG}" >> .env.default
-    - docker network prune -f # Remove unused networks (not referenced by any containers)
-    - make back
-  after_script:
-    - docker network prune -f # Remove unused networks (not referenced by any containers)
-    - docker-compose down -v --remove-orphans # PHP container was required for composer
+    - docker run -e "COMPOSER_MEMORY_LIMIT=1G" --user 1000:1000 --rm --init -v `pwd`:`pwd` -w `pwd` "$IMAGE_PHP" /bin/ash -c "composer --version && composer install --no-interaction --prefer-dist -o -v --ignore-platform-reqs && composer create-required-files" # Make back on the fly, using --ignore-platform-reqs as additional PHP-extensions could be missing
   cache:
     key:
       files:
@@ -157,8 +153,8 @@ prepare:back:
       - drush/contrib/
   dependencies: []
   artifacts:
-    name: "$CI_COMMIT_REF_NAME:$CI_COMMIT_SHA:back"
-    expire_in: 12 hrs
+    name: "${CI_COMMIT_REF_NAME}:${CI_COMMIT_SHA}:back"
+    expire_in: 1d
     paths:
       - vendor/
       - web/
@@ -166,12 +162,19 @@ prepare:back:
     exclude:
       - web/modules/custom/
       - web/themes/custom/
-      - web/profiles/sdd/
+      - web/profiles/contrib/
   extends: .runner_tag_selection
-  only:
-    - branches
-    - merge_requests
-    - tags
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_TAG
 
 prepare:front:
   stage: prepare
@@ -181,22 +184,26 @@ prepare:front:
   dependencies:
     - sniffers:front
   artifacts:
-    name: "$CI_COMMIT_REF_NAME:$CI_COMMIT_SHA:front"
-    expire_in: 12 hrs
+    name: "${CI_COMMIT_REF_NAME}:${CI_COMMIT_SHA}:front"
+    expire_in: 1d
     paths:
       - ${THEME_PATH}/dist/ # Populated during yarn build
   extends: .runner_tag_selection
-  only:
-    refs:
-      - branches
-      - merge_requests
-      - tags
-    variables:
-      - $THEME_PATH
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline' && $THEME_PATH
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $THEME_PATH
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $THEME_PATH
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_TAG && $THEME_PATH
 
 
 .deploy_template: &deploy_template
-  stage: deploy
+  stage: build
   script:
     - echo "Deploy ${CI_ENVIRONMENT_URL} review app to ${BUILD_DIR}."
     - echo "CI_ENVIRONMENT_NAME=${CI_ENVIRONMENT_NAME}"
@@ -211,104 +218,221 @@ prepare:front:
     - cd ${BUILD_DIR}
     - echo "COMPOSE_PROJECT_NAME=${CI_PROJECT_NAME}-review-${CI_COMMIT_REF_SLUG}" >> .env.default
     - echo "MAIN_DOMAIN_NAME=${CI_ENVIRONMENT_SLUG}-${CI_PROJECT_PATH_SLUG}.${REVIEW_DOMAIN}" >> .env.default
-    - echo "INSTALL_DEV_DEPENDENCIES=TRUE" >> .env.default
     - docker --version
-    - docker-compose --version
+    - docker compose version
     - make all_ci
+    - make drush config-set system.site name '${CI_COMMIT_REF_SLUG}' -- -y
+    - echo "Copying DB and files to make them accessible to artifact creator"
+    - docker compose exec -T --user root php ash -c "chmod -R 775 .cache/ web/sites/"
+    - cp -r .cache/ ${CI_PROJECT_DIR} && cp -r web/sites/ ${CI_PROJECT_DIR}/web/ # https://gitlab.com/gitlab-org/gitlab-foss/-/issues/15530#note_533732001
   after_script:
+    - docker network prune -f
+    - docker container prune -f
     - echo "Started ${CI_ENVIRONMENT_URL} composition in ${BUILD_DIR} from Makefile."
-  environment:
-    url: https://${CI_ENVIRONMENT_SLUG}-${CI_PROJECT_PATH_SLUG}.${REVIEW_DOMAIN}
-    name: review/$CI_COMMIT_REF_NAME
-    on_stop: stop_review
   dependencies:
     - prepare:back
     - prepare:front
   allow_failure: false # https://gitlab.com/gitlab-org/gitlab-foss/-/issues/25892#note_26909808
   extends: .runner_tag_selection
-  only:
-    - branches
-    - merge_requests
 
+.deploy_template_environment_ttl_long: &deploy_template_environment_ttl_long
+  environment:
+    url: https://${CI_ENVIRONMENT_SLUG}-${CI_PROJECT_PATH_SLUG}.${REVIEW_DOMAIN}
+    name: review/${CI_COMMIT_REF_NAME}
+    on_stop: stop_review
+    auto_stop_in: 1 month
 
-deploy:review:
+.deploy_template_environment_ttl_mid: &deploy_template_environment_ttl_mid
+  environment:
+    url: https://${CI_ENVIRONMENT_SLUG}-${CI_PROJECT_PATH_SLUG}.${REVIEW_DOMAIN}
+    name: review/${CI_COMMIT_REF_NAME}
+    on_stop: stop_review
+    auto_stop_in: 1 week
+
+.deploy_template_environment_ttl_short: &deploy_template_environment_ttl_short
+  environment:
+    url: https://${CI_ENVIRONMENT_SLUG}-${CI_PROJECT_PATH_SLUG}.${REVIEW_DOMAIN}
+    name: review/${CI_COMMIT_REF_NAME}
+    on_stop: stop_review
+    auto_stop_in: 1 day
+
+build:review:
   <<: *deploy_template
+  <<: *deploy_template_environment_ttl_mid
   when: manual
-  except:
-  - master
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline' && $CI_MERGE_REQUEST_IID
+      changes:
+        - {{ project.path }}/**/*
 
-deploy:master:
+build:master:
   <<: *deploy_template
+  <<: *deploy_template_environment_ttl_long
   when: always
-  only:
-  - master
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline' && $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+      changes:
+        - {{ project.path }}/**/*
+
+build:tag:
+  <<: *deploy_template
+  <<: *deploy_template_environment_ttl_short
+  when: manual
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline' && $CI_COMMIT_TAG
+  artifacts:
+    name: "${CI_PROJECT_NAME}-raw_build_db_and_files-tag-artifact"
+    expire_in: 1 week
+    paths:
+      - web/sites/*/files/
+      - .cache
 
 stop_review:
-  stage: deploy
+  stage: build
+  variables:
+    GIT_STRATEGY: none
   dependencies: []
   script:
-    - date; pwd; ls -lahq;
     - echo "Clean-up build dir ${BUILD_DIR}"
     - (if [ -d ${BUILD_DIR} ]; then date; cd ${BUILD_DIR}; pwd; make clean; cd -; rm -rf ${BUILD_DIR}; fi)
     - echo "Removed previous review app ${CI_ENVIRONMENT_URL} from ${BUILD_DIR}."
-  variables:
-    GIT_STRATEGY: none
   when: manual
   environment:
-    name: review/$CI_COMMIT_REF_NAME
+    name: review/${CI_COMMIT_REF_NAME}
     action: stop
   extends: .runner_tag_selection
-  only:
-    - branches
-    - merge_requests
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_TAG
 
-deploy:storybook:
-  stage: storybook
+generate:logins:
+  stage: build
+  dependencies: []
+  script:
+    - cd ${BUILD_DIR}
+    - make info
+  when: manual
   environment:
     url: https://${CI_ENVIRONMENT_SLUG}-${CI_PROJECT_PATH_SLUG}.${REVIEW_DOMAIN}
-    name: review/$CI_COMMIT_REF_NAME
+    name: review/${CI_COMMIT_REF_NAME}
+    on_stop: stop_review
+  extends: .runner_tag_selection
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - {{ project.path }}/**/*
+
+test:deploy:
+  stage: update
+  extends: .runner_tag_selection
+  environment:
+    url: https://${CI_ENVIRONMENT_SLUG}-${CI_PROJECT_PATH_SLUG}.${REVIEW_DOMAIN}
+    name: review/${CI_COMMIT_REF_NAME}
     on_stop: stop_review
   script:
-  - cd ${BUILD_DIR}
-  - make build-storybook
-  - echo "- Storybook is accessible here :" && echo "${CI_ENVIRONMENT_URL}/${STORYBOOK_PATH}"
-  except:
-    - tags
+    - cd ${BUILD_DIR}
+    - ls -lah
+    - ls -lah .cache/
+    - ls -lah web/sites/*/files/
+    - printf "\033[1m- Getting name of last tag created...\n\033[0m"
+    - export LAST_TAG=$(curl --header "Authorization:${GITLAB_PROJECT_BASIC_AUTH}" --header "PRIVATE-TOKEN:${GITLAB_PROJECT_ACCESS_TOKEN}" "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/repository/tags" | jq -r '.[0] | .name')
+    - |
+      if [ "${LAST_TAG}" = "null" ]; then printf "\033[1m- No tag was found. Nothing to do here.\n\033[0m"; else \
+      printf "\033[1m- Tag found! (${LAST_TAG}) Downloading it's artifacts...\n\033[0m" && \
+      curl --location --output artifacts.zip --header "Authorization:${GITLAB_PROJECT_BASIC_AUTH}" --header "PRIVATE-TOKEN:${GITLAB_PROJECT_ACCESS_TOKEN}" "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/jobs/artifacts/${LAST_TAG}/download?job=build:tag" && \
+      printf "\033[1m- Artifacts were successfully downloaded from tag ${LAST_TAG}\n\033[0m" && \
+      printf "\033[1m- Replacing DB and files of ${CI_ENVIRONMENT_URL} from those of ${LAST_TAG} tag artifacts\n\033[0m" && \
+      docker compose exec -T --user root php ash -c "chmod -R 775 .cache/ web/sites/*/files/" && \
+      rm -rf .cache/* web/sites/*/files/* && \
+      unzip -o artifacts.zip && \
+      printf "\033[1m- DB and files from ${CI_ENVIRONMENT_URL} were successfully replaced from those of the artifacts\n\033[0m" && \
+      make drush cr && \
+      # Disabling config_ignore so that all configs will be imported bellow
+      if [ $(docker compose exec -T php sh -c "drush config:status --state=Any --format=list | grep config_ignore.settings | wc -l") -gt 0 ]; then make drush config:delete config_ignore.settings -- -y && make drush cr; fi && \
+      printf "\033[1m- Simulating deployment against tag ${LAST_TAG}...\n\033[0m" && \
+      make drush deploy -- -y && \
+      printf "\033[1m- Successful deployment simulation of ${CI_COMMIT_REF_NAME} against tag ${LAST_TAG} using ${CI_ENVIRONMENT_URL} review app.\n\033[0m"; fi
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline' && $TEST_UPDATE_DEPLOYMENTS == "TRUE"
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $TEST_UPDATE_DEPLOYMENTS == "TRUE"
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $TEST_UPDATE_DEPLOYMENTS == "TRUE"
+      changes:
+        - {{ project.path }}/**/*
+
+test:storybook:
+  stage: tests
+  environment:
+    url: https://${CI_ENVIRONMENT_SLUG}-${CI_PROJECT_PATH_SLUG}.${REVIEW_DOMAIN}
+    name: review/${CI_COMMIT_REF_NAME}
+    on_stop: stop_review
+  script:
+    - cd ${BUILD_DIR}
+    - make build-storybook
+    - echo "- Storybook is accessible here :" && echo "${CI_ENVIRONMENT_URL}/${STORYBOOK_PATH}"
   extends: .runner_tag_selection
-  only:
-    refs:
-      - branches
-      - merge_requests
-    variables:
-      - $STORYBOOK_PATH
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline' && $STORYBOOK_PATH
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $STORYBOOK_PATH
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $STORYBOOK_PATH
+      changes:
+        - {{ project.path }}/**/*
 
 test:behat:
   stage: tests
   environment:
     url: https://${CI_ENVIRONMENT_SLUG}-${CI_PROJECT_PATH_SLUG}.${REVIEW_DOMAIN}
-    name: review/$CI_COMMIT_REF_NAME
+    name: review/${CI_COMMIT_REF_NAME}
     on_stop: stop_review
   script:
-  - echo "Starting job script in ${BUILD_DIR}"
-  - cd ${BUILD_DIR}
-  - BEHAT_ARGS='--colors -f pretty -o std -f junit -o features/junit' make behat
+    - echo "Starting job script in ${BUILD_DIR}"
+    - cd ${BUILD_DIR}
+    - BEHAT_ARGS='--colors -f pretty -o std -f junit -o features/junit' make behat
   after_script:
-  - cd ${BUILD_DIR}
-  - make browser_driver_stop
-  - rm -rf web/screenshots
-  - mkdir web/screenshots
-  - mv features/*.png web/screenshots/
-  - echo "- Screenshots are available here :" && cd web/screenshots && ls -h *.png | xargs -i echo "${CI_ENVIRONMENT_URL}/screenshots/{}"
-  - mv ${BUILD_DIR}/features/junit ${CI_PROJECT_DIR}
+    - cd ${BUILD_DIR}
+    - make browser_driver_stop
+    - rm -rf web/screenshots
+    - mkdir web/screenshots
+    - mv features/*.png web/screenshots/
+    - echo "- Screenshots are available here :" && cd web/screenshots && ls -h *.png | xargs -i echo "${CI_ENVIRONMENT_URL}/screenshots/{}"
+    - mv ${BUILD_DIR}/features/junit ${CI_PROJECT_DIR}
   retry:
     max: 2
     when: script_failure
   dependencies:
-  - deploy:review
+    - build:review
   extends: .runner_tag_selection
-  only:
-    - branches
-    - merge_requests
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - {{ project.path }}/**/*
   artifacts:
     expire_in: 1 week
     when: always
@@ -321,41 +445,55 @@ test:cinsp:
   stage: tests
   environment:
     url: https://${CI_ENVIRONMENT_SLUG}-${CI_PROJECT_PATH_SLUG}.${REVIEW_DOMAIN}
-    name: review/$CI_COMMIT_REF_NAME
+    name: review/${CI_COMMIT_REF_NAME}
     on_stop: stop_review
   script:
-  - echo "Starting job script in ${BUILD_DIR}"
-  - cd ${BUILD_DIR}
-  - make cinsp
+    - echo "Starting job script in ${BUILD_DIR}"
+    - cd ${BUILD_DIR}
+    - make cinsp
   dependencies:
-  - deploy:review
+    - build:review
   extends: .runner_tag_selection
-  only:
-    - branches
-    - merge_requests
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - {{ project.path }}/**/*
 
 test:drupalrector:
   stage: tests
   environment:
     url: https://${CI_ENVIRONMENT_SLUG}-${CI_PROJECT_PATH_SLUG}.${REVIEW_DOMAIN}
-    name: review/$CI_COMMIT_REF_NAME
+    name: review/${CI_COMMIT_REF_NAME}
     on_stop: stop_review
   script:
-  - echo "Starting job script in ${BUILD_DIR}"
-  - cd ${BUILD_DIR}
-  - make drupalrectorval
+    - echo "Starting job script in ${BUILD_DIR}"
+    - cd ${BUILD_DIR}
+    - make drupalrectorval
   dependencies:
-  - deploy:review
+    - build:review
   extends: .runner_tag_selection
-  only:
-    - branches
-    - merge_requests
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - {{ project.path }}/**/*
 
 test:lighthouse:
   stage: tests
   environment:
     url: https://${CI_ENVIRONMENT_SLUG}-${CI_PROJECT_PATH_SLUG}.${REVIEW_DOMAIN}
-    name: review/$CI_COMMIT_REF_NAME
+    name: review/${CI_COMMIT_REF_NAME}
     on_stop: stop_review
   script:
     - echo "Starting job script in ${BUILD_DIR}"
@@ -367,104 +505,143 @@ test:lighthouse:
     - docker exec --tty -u root ${CI_PROJECT_NAME}-review-${CI_COMMIT_REF_SLUG}_lighthouse npm install -g @lhci/cli@0.6.x
     - docker exec --tty ${CI_PROJECT_NAME}-review-${CI_COMMIT_REF_SLUG}_lighthouse lhci --version
     - docker exec --tty ${CI_PROJECT_NAME}-review-${CI_COMMIT_REF_SLUG}_lighthouse lhci healthcheck
-    - docker exec --tty ${CI_PROJECT_NAME}-review-${CI_COMMIT_REF_SLUG}_lighthouse lhci collect --url=https://${CI_ENVIRONMENT_SLUG}-${CI_PROJECT_PATH_SLUG}.${REVIEW_DOMAIN}
+    - docker exec --tty ${CI_PROJECT_NAME}-review-${CI_COMMIT_REF_SLUG}_lighthouse lhci collect --url=https://${RA_BASIC_AUTH_USERNAME}:${RA_BASIC_AUTH_PASSWORD}@${CI_ENVIRONMENT_SLUG}-${CI_PROJECT_PATH_SLUG}.${REVIEW_DOMAIN}
     - docker exec --tty ${CI_PROJECT_NAME}-review-${CI_COMMIT_REF_SLUG}_lighthouse lhci assert
   after_script:
-    - if [ -n `docker ps -f 'name=${CI_PROJECT_NAME}-review-${CI_COMMIT_REF_SLUG}_lighthouse' --format '{{.Names}}'` ]; then echo 'Stopping container'; docker rm --force ${CI_PROJECT_NAME}-review-${CI_COMMIT_REF_SLUG}_lighthouse; fi
+    - if [ -n `docker ps -f 'name=${CI_PROJECT_NAME}-review-${CI_COMMIT_REF_SLUG}_lighthouse' -q` ]; then echo 'Stopping container'; docker rm --force ${CI_PROJECT_NAME}-review-${CI_COMMIT_REF_SLUG}_lighthouse; fi
     - cd ${BUILD_DIR}
     - if [ -d .lighthouseci ]; then mv .lighthouseci web/lighthouseci; echo "- Reports are available here :" && for i in $(find web/lighthouseci/ -name "*.html"); do basename $i;done | xargs -i echo "${CI_ENVIRONMENT_URL}/lighthouseci/{}"; fi
   dependencies:
-  - deploy:review
+    - build:review
   extends: .runner_tag_selection
-  only:
-    - branches
-    - merge_requests
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - {{ project.path }}/**/*
 
 test:contentgen:
   stage: tests
   environment:
     url: https://${CI_ENVIRONMENT_SLUG}-${CI_PROJECT_PATH_SLUG}.${REVIEW_DOMAIN}
-    name: review/$CI_COMMIT_REF_NAME
+    name: review/${CI_COMMIT_REF_NAME}
     on_stop: stop_review
   script:
-  - echo "Starting job script in ${BUILD_DIR}"
-  - cd ${BUILD_DIR}
-  - make contentgen
+    - echo "Starting job script in ${BUILD_DIR}"
+    - cd ${BUILD_DIR}
+    - make contentgen
   dependencies:
-  - deploy:review
+    - build:review
   extends: .runner_tag_selection
-  only:
-    - branches
-    - merge_requests
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - {{ project.path }}/**/*
   when: manual
 
 test:patch:
   stage: tests
   environment:
     url: https://${CI_ENVIRONMENT_SLUG}-${CI_PROJECT_PATH_SLUG}.${REVIEW_DOMAIN}
-    name: review/$CI_COMMIT_REF_NAME
+    name: review/${CI_COMMIT_REF_NAME}
     on_stop: stop_review
   script:
-  - echo "Starting job script in ${BUILD_DIR}"
-  - cd ${BUILD_DIR}
-  - make patchval
+    - echo "Starting job script in ${BUILD_DIR}"
+    - cd ${BUILD_DIR}
+    - make patchval
   extends: .runner_tag_selection
-  except:
-    variables:
-      - $RUN_PATCHVAL_CI_JOB == "FALSE" # To use only in case of private packages and if patching upstream is not possible at all
-  only:
-    refs:
-      - branches
-      - merge_requests
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline' && $RUN_PATCHVAL_CI_JOB != "FALSE"
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $RUN_PATCHVAL_CI_JOB != "FALSE"
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $RUN_PATCHVAL_CI_JOB != "FALSE"
+      changes:
+        - {{ project.path }}/**/*
+    # Use $RUN_PATCHVAL_CI_JOB=TRUE only in case patching upstream is not possible at all, like private packages
 
-report:statusreportval:
-  stage: reports
+test:statusreport:
+  stage: 'more tests'
   environment:
     url: https://${CI_ENVIRONMENT_SLUG}-${CI_PROJECT_PATH_SLUG}.${REVIEW_DOMAIN}
-    name: review/$CI_COMMIT_REF_NAME
+    name: review/${CI_COMMIT_REF_NAME}
     on_stop: stop_review
   script:
-  - echo "Starting job script in ${BUILD_DIR}"
-  - cd ${BUILD_DIR}
-  - make statusreportval
+    - echo "Starting job script in ${BUILD_DIR}"
+    - cd ${BUILD_DIR}
+    - make statusreportval
   dependencies:
-  - deploy:review
+    - build:review
   extends: .runner_tag_selection
-  only:
-    - branches
-    - merge_requests
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - {{ project.path }}/**/*
 
 test:upgradestatus:
-  stage: reports
+  stage: 'more tests'
   environment:
     url: https://${CI_ENVIRONMENT_SLUG}-${CI_PROJECT_PATH_SLUG}.${REVIEW_DOMAIN}
-    name: review/$CI_COMMIT_REF_NAME
+    name: review/${CI_COMMIT_REF_NAME}
     on_stop: stop_review
   script:
-  - echo "Starting job script in ${BUILD_DIR}"
-  - cd ${BUILD_DIR}
-  - make upgradestatusval
+    - echo "Starting job script in ${BUILD_DIR}"
+    - cd ${BUILD_DIR}
+    - make upgradestatusval
   dependencies:
-  - deploy:review
+    - build:review
   extends: .runner_tag_selection
-  only:
-    - branches
-    - merge_requests
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - {{ project.path }}/**/*
 
-report:watchdog:
-  stage: reports
+test:watchdog:
+  stage: 'more tests'
   environment:
     url: https://${CI_ENVIRONMENT_SLUG}-${CI_PROJECT_PATH_SLUG}.${REVIEW_DOMAIN}
-    name: review/$CI_COMMIT_REF_NAME
+    name: review/${CI_COMMIT_REF_NAME}
     on_stop: stop_review
   script:
-  - echo "Starting job script in ${BUILD_DIR}"
-  - cd ${BUILD_DIR}
-  - make watchdogval
+    - echo "Starting job script in ${BUILD_DIR}"
+    - cd ${BUILD_DIR}
+    - make watchdogval
   dependencies:
-  - deploy:review
+    - build:review
   extends: .runner_tag_selection
-  only:
-    - branches
-    - merge_requests
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'parent_pipeline'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - {{ project.path }}/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - {{ project.path }}/**/*
 

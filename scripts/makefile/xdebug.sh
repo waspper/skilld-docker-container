@@ -16,12 +16,14 @@ xdebug_status() {
 }
 
 xdebug_find_file() {
-	if [ -f /etc/php7/conf.d/50_xdebug.ini ]; then
-		echo /etc/php7/conf.d/50_xdebug.ini
+	if [ -f /etc/php81/conf.d/50_xdebug.ini ]; then
+		echo /etc/php81/conf.d/50_xdebug.ini
+	elif [ -f /etc/php82/conf.d/50_xdebug.ini ]; then
+		echo /etc/php82/conf.d/50_xdebug.ini
 	elif [ -f /etc/php8/conf.d/50_xdebug.ini ]; then
 		echo /etc/php8/conf.d/50_xdebug.ini
 	else
-	  printf "%bXdebug ini file not found%b\n" "${RED}" "${NC}" && exit 1
+		printf "%bXdebug ini file not found%b\n" "${RED}" "${NC}" && exit 1
 	fi
 }
 
@@ -45,10 +47,16 @@ xdebug_off() {
 	fi
 }
 
+xdebug_reload() {
+	SCRIPT=$(readlink -f "$0")
+	SCRIPTPATH=$(dirname "$SCRIPT")
+	. "$SCRIPTPATH"/reload.sh
+}
+
 set -e
 
 case "$ACTION" in
-	on|off) xdebug_"$ACTION" "$(xdebug_find_file)" && kill -USR2 1 && xdebug_status ;;
+	on|off) xdebug_"$ACTION" "$(xdebug_find_file)" && xdebug_reload && xdebug_status ;;
 	status) printf "Xdebug status..." && xdebug_status ;;
 	*) printf "%bRequires [on|off|status] argument%b\n" "${RED}" "${NC}" && exit 1 ;;
 esac
